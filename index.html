@@ -115,54 +115,65 @@
                 },
 
                 async processWithAI() {
-                    if (!this.rawData.trim()) return;
-                    this.isLoading = true;
-                    this.results = [];
+    if (!this.rawData.trim()) return;
+    this.isLoading = true;
+    this.results = [];
 
-                    // Prompt Engineering
-                    const prompt = `
-                        Kamu adalah asisten editor undangan pernikahan profesional. Tugasmu adalah merapikan data berantakan menjadi format JSON yang rapi sesuai EYD Bahasa Indonesia.
-                        
-                        Aturan:
-                        1. Perbaiki kapitalisasi (Nama Orang = Title Case, Gelar = Sesuai baku misal S.Kom., Alamat = Title Case).
-                        2. Perbaiki penulisan gelar (contoh: 's kom' -> 'S.Kom.', 'hajjah' -> 'Hj.').
-                        3. Ekstrak label data (misal: Nama Pria, Nama Wanita, Alamat, Ayah Pria, dll) berdasarkan konteks teks input.
-                        4. Output WAJIB hanya JSON Array murni tanpa format markdown.
-                        
-                        Contoh Output JSON:
-                        [
-                            {"label": "Nama Mempelai Pria", "value": "Budi Santoso, S.Kom."},
-                            {"label": "Alamat", "value": "Jl. Jend. Sudirman No. 5, Medan"}
-                        ]
+    // Prompt yang diperkuat
+    const prompt = `
+        Kamu adalah asisten editor undangan pernikahan profesional. Tugasmu adalah merapikan data berantakan menjadi format JSON yang rapi sesuai EYD Bahasa Indonesia.
+        
+        Aturan:
+        1. Perbaiki kapitalisasi (Nama Orang = Title Case, Gelar = Sesuai baku misal S.Kom., Alamat = Title Case).
+        2. Perbaiki penulisan gelar (contoh: 's kom' -> 'S.Kom.', 'hajjah' -> 'Hj.').
+        3. Ekstrak label data (misal: Nama Pria, Nama Wanita, Alamat, Ayah Pria, dll) berdasarkan konteks teks input.
+        4. Output WAJIB hanya JSON Array murni tanpa format markdown.
+        
+        Data Input:
+        ${this.rawData}
+    `;
 
-                        Data Input:
-                        ${this.rawData}
-                    `;
+    try {
+        // Perhatikan: Model gemini-1.5-flash ditentukan disini
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${this.apiKey}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                // SOLUSI: Matikan semua filter keamanan agar teks undangan lolos
+                safetySettings: [
+                    { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                    { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                    { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                    { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+                ]
+            })
+        });
 
-                    try {
-                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${this.apiKey}`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                                contents: [{ parts: [{ text: prompt }] }]
-                            })
-                        });
+        const data = await response.json();
 
-                        const data = await response.json();
-                        const rawText = data.candidates[0].content.parts[0].text;
-                        
-                        // Bersihkan markdown block (```json ... ```) jika ada
-                        const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-                        
-                        this.results = JSON.parse(cleanJson);
+        // Cek error spesifik dari Google
+        if (data.error) {
+            throw new Error(data.error.message); 
+        }
 
-                    } catch (error) {
-                        console.error(error);
-                        alert("Terjadi kesalahan atau API Key habis kuota.");
-                    } finally {
-                        this.isLoading = false;
-                    }
-                },
+        // Cek jika kena blokir Safety (biasanya returned content kosong)
+        if (!data.candidates || !data.candidates[0].content) {
+            throw new Error("Teks diblokir oleh Safety Filter. (Padahal aman, tapi AI salah paham).");
+        }
+
+        const rawText = data.candidates[0].content.parts[0].text;
+        const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+        this.results = JSON.parse(cleanJson);
+
+    } catch (error) {
+        console.error("Error Detail:", error);
+        // Tampilkan pesan error yang JELAS ke layar
+        alert("Gagal: " + error.message);
+    } finally {
+        this.isLoading = false;
+    }
+},
 
                 // Helper Functions
                 copyToClipboard(text) {
@@ -179,4 +190,5 @@
         }
     </script>
 </body>
+
 </html>
